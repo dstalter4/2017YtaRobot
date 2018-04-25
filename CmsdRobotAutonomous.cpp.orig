@@ -1,0 +1,1327 @@
+////////////////////////////////////////////////////////////////////////////////
+/// @file CmsdRobotAutonomous.cpp
+///
+/// Implementation of autonmous routines for CmsdRobot.
+///
+/// CMSD FRC 2017
+/// Author: David Stalter
+///
+////////////////////////////////////////////////////////////////////////////////
+
+// SYSTEM INCLUDES
+// <none>
+
+// C INCLUDES
+// (none)
+
+// C++ INCLUDES
+#include "CmsdRobot.hpp"        // Robot class declaration
+
+
+// Field Layout (Measurements from Palmetto)
+//      72"    72"  32"  72"
+//    ______|______|___|______
+//   /|
+//  / |  36"
+// /__|
+// | 36" (This is a 45-45-90 triangle)
+// |
+// |
+// - 96" (from wall)
+// |
+// |------------------> Airship 132" (roughly)
+// - 132" (from wall, roughly)
+
+// Row-bit
+//
+// -----      -----
+// | ^            |
+// | |            |
+// | 28"          |
+// | |            |
+// | v            |
+// ----------------
+//    <-- 32" -->
+// Bumpers = 3.5"
+
+// => Row-bit has x = 39", y = 35"
+
+// Traversal Distances:
+// 1. y-axis driver station move (align edge of alliance wall plate): 0", 72", 176"
+// 2. x-axis to fuel station move: 120" - 35" = 85"
+// 3. y-axis to fuel station move: 36"
+// 4. y-axis back away from fuel station move: 12"
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::Autonomous
+///
+/// The autonomous control method.  This method is called once
+/// each time the robot enters autonomous control.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::Autonomous()
+{
+    // Put everything in a stable state
+    InitialStateSetup();
+    m_pAutonomousTimer->Stop();
+    m_pAutonomousTimer->Reset();
+    m_pSafetyTimer->Stop();
+    m_pSafetyTimer->Reset();
+    
+    // Change values in the header to control having an
+    // autonomous routine and which is selected
+
+    // Auto routine 1
+    if ( AUTONOMOUS_ROUTINE_1 )//m_pAutonomousRoutine1Switch->Get() )
+    {
+        AutonomousRoutine1();
+        while ( m_pDriverStation->IsAutonomous() ) {}
+    }
+    
+    // Auto routine 2
+    else if ( AUTONOMOUS_ROUTINE_2 )//m_pAutonomousRoutine2Switch->Get() )
+    {
+        AutonomousRoutine2();
+        while ( m_pDriverStation->IsAutonomous() ) {}
+    }
+    
+    // Auto routine 3
+    else if ( AUTONOMOUS_ROUTINE_3 )//m_pAutonomousRoutine3Switch->Get() )
+    {
+        AutonomousRoutine3();
+        while ( m_pDriverStation->IsAutonomous() ) {}
+    }
+    
+    // Auto routine 4
+    else if ( AUTONOMOUS_ROUTINE_4 )//m_pAutonomousRoutine4Switch->Get() )
+    {
+        AutonomousRoutine4();
+        while ( m_pDriverStation->IsAutonomous() ) {}
+    }
+
+    /* !!! ONLY ENABLE TEST AUTONOMOUS CODE WHEN TESTING
+           SELECT A FUNCTIONING ROUTINE FOR ACTUAL MATCHES !!! */
+    else if ( AUTONOMOUS_TEST_ENABLED )
+    {
+        // This code will never return
+        AutonomousTestCode();
+    }
+
+    else
+    {
+        // No option was selected; ensure known behavior to avoid issues
+        while ( m_pDriverStation->IsAutonomous() ) {}
+    }
+
+}   // End Autonomous
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousCommon
+///
+/// Common autonomous behavior.  It moves away from the alliance
+/// wall and to the fuel loading station.  The variance is
+/// whether it shoots at the start or at the end.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousCommon(bool bStartShoot, bool bEndShoot)
+{
+
+////////////////////////////////////////////////////////////////////////////////
+// Initial state setup based on alliance.
+////////////////////////////////////////////////////////////////////////////////
+    // Turn the agitator on
+    m_pAgitatorMotor->Set(ON);
+    if (bStartShoot)
+    {
+        AutonomousShoot();
+    }
+    
+    if (m_AllianceColor == Alliance::kRed)
+    {
+        AutonomousCommonRed(-AUTO_DRIVE_SPEED_SLOW, bEndShoot);
+    }
+    else if (m_AllianceColor == Alliance::kBlue)
+    {
+        AutonomousCommonBlue(AUTO_DRIVE_SPEED_SLOW, bEndShoot);
+    }
+    else
+    {
+    }
+    
+    m_pAgitatorMotor->Set(OFF);
+}
+
+
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousCommonRed
+///
+/// Common autonomous behavior when on the red alliance.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousCommonRed(float driveSpeed, bool bEndShoot)
+{
+    volatile bool bIsAutonomous = true;
+////////////////////////////////////////////////////////////////////////////////
+// Turn away from the wall.
+////////////////////////////////////////////////////////////////////////////////
+    //bIsAutonomous = m_pDriverStation->IsAutonomous();
+    //if (bIsAutonomous)
+    //{
+        // Gyro turn is protected by the safety timer
+        //bool bResult = AutonomousGyroLeftTurn((AUTO_NINETY_DEGREE_TURN_ANGLE + AUTO_TURN_ANGLE_SLOP_DEGREES), AUTO_TURN_SPEED);
+        //AutonomousDelay(AUTO_DELAY_SHORT_S);
+        
+        //if (!bResult)
+        //{
+        //  return;
+        //}
+    //}
+    //else
+    //{
+        //return;
+    //}
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Back away from the alliance wall.
+////////////////////////////////////////////////////////////////////////////////
+    // Starting a new drive operation, tare encoders
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            AutonomousEncoderDrive(driveSpeed);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        }
+        
+        // |
+        // |    S              S
+        // ||3.5|     28.5     |3.5|     -->          120
+        //      | <---   32   ---> |     -->          (120 - 32 = 88)
+        //
+        // TODO: Add increase/decrease continuity checks and repeated out of range readings before failing.
+        //while ((m_I2cData.m_FrontSonarA < AUTO_SONAR_LATERAL_DRIVE_DIST_INCHES) && (m_I2cData.m_FrontSonarB < AUTO_SONAR_LATERAL_DRIVE_DIST_INCHES));
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -28000.0F) && (m_pRightDriveMotor->GetEncoderValue() > -28000.0F));
+        
+        // Negative, this drive is backwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -AUTO_ENCODER_DRIVE_FIRST_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() > -AUTO_ENCODER_DRIVE_FIRST_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Turn towards fuel loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        AutonomousGyroLeftTurn(AUTO_NINETY_DEGREE_TURN_ANGLE + AUTO_TURN_ANGLE_SLOP_DEGREES + AUTO_TURN_ANGLE_EXTRA_SLOP_DEGREES, AUTO_TURN_SPEED);
+    }
+    else
+    {
+        return;
+    }
+        
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Drive towards fuel loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            // Negative because it is the opposite direction of
+            // moving away from the alliance wall.
+            AutonomousEncoderDrive(-driveSpeed * 2.0F);
+            //AutonomousEncoderDrive(-driveSpeed - AUTO_DRIVE_RAMMING_SPEED);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        }
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) < 15000.0F) && (m_pRightDriveMotor->GetEncoderValue() < 15000.0F));
+        
+        // Positive, this drive is forwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) < AUTO_ENCODER_DRIVE_SECOND_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() < AUTO_ENCODER_DRIVE_SECOND_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        
+        // Delay to gather some balls
+        AutonomousDelay(AUTO_GATHER_FUEL_BALLS_DELAY_S);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Back up from loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            AutonomousEncoderDrive(driveSpeed);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        }
+        // Negative, this drive is backwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -4000.0F) && (m_pRightDriveMotor->GetEncoderValue() > -4000.0F));
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -AUTO_ENCODER_DRIVE_THIRD_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() > -AUTO_ENCODER_DRIVE_THIRD_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_THIRD_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_THIRD_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        
+        AutonomousDelay(AUTO_DELAY_SHORT_S);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Turn towards the goal.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        if (!AutonomousGyroRightTurn(AUTO_TURN_TO_BOILER_ANGLE_DEGREES, AUTO_TURN_SPEED))
+        {
+            return;
+        }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Shoot.
+////////////////////////////////////////////////////////////////////////////////
+        if (bEndShoot)
+        {
+            AutonomousShoot();
+        }
+    }
+}
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+///                           Red/Blue Separation                            ///
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousCommonBlue
+///
+/// Common autonomous behavior when on the blue alliance.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousCommonBlue(float driveSpeed, bool bEndShoot)
+{
+    volatile bool bIsAutonomous = true;
+////////////////////////////////////////////////////////////////////////////////
+// Turn away from the wall.
+////////////////////////////////////////////////////////////////////////////////
+    //bIsAutonomous = m_pDriverStation->IsAutonomous();
+    //if (bIsAutonomous)
+    //{
+        // Gyro turn is protected by the safety timer
+        //bool bRestul = AutonomousGyroRightTurn((AUTO_NINETY_DEGREE_TURN_ANGLE + AUTO_TURN_ANGLE_SLOP_DEGREES), AUTO_TURN_SPEED);
+        //AutonomousDelay(AUTO_DELAY_SHORT_S);
+        //if (!bResult)
+        //{
+        //  return;
+        //}
+    //}
+    //else
+    //{
+        //return;
+    //}
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Back away from the alliance wall.
+////////////////////////////////////////////////////////////////////////////////
+    // Starting a new drive operation, tare encoders
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            //AutonomousEncoderDrive(-AUTO_DRIVE_SPEED_SLOW*1.5F);
+            AutonomousEncoderDrive(driveSpeed);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        }
+        
+        // |
+        // |    S              S
+        // ||3.5|     28.5     |3.5|     -->          120
+        //      | <---   32   ---> |     -->          (120 - 32 = 88)
+        //
+        // TODO: Add increase/decrease continuity checks and repeated out of range readings before failing.
+        //while ((m_I2cData.m_FrontSonarA < AUTO_SONAR_LATERAL_DRIVE_DIST_INCHES) && (m_I2cData.m_FrontSonarB < AUTO_SONAR_LATERAL_DRIVE_DIST_INCHES));
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) < 28000.0F) && (m_pRightDriveMotor->GetEncoderValue() < 28000.0F));
+        
+        // Positive, this drive is forwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) < AUTO_ENCODER_DRIVE_FIRST_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() < AUTO_ENCODER_DRIVE_FIRST_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Turn towards fuel loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        AutonomousGyroRightTurn(AUTO_NINETY_DEGREE_TURN_ANGLE + AUTO_TURN_ANGLE_SLOP_DEGREES + AUTO_TURN_ANGLE_EXTRA_SLOP_DEGREES, AUTO_TURN_SPEED);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Drive towards fuel loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            // Negative because it is the opposite direction of
+            // moving away from the alliance wall.
+            AutonomousEncoderDrive(-driveSpeed * 2.0F);
+            //AutonomousEncoderDrive(driveSpeed + AUTO_DRIVE_RAMMING_SPEED);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        
+        }
+        
+        // Negative, this drive is backwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -AUTO_ENCODER_DRIVE_SECOND_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() > -AUTO_ENCODER_DRIVE_SECOND_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() > -GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        
+        // Delay to gather some balls
+        AutonomousDelay(AUTO_GATHER_FUEL_BALLS_DELAY_S);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Back up from loading station.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        m_pLeftDriveMotor->TareEncoder();
+        m_pRightDriveMotor->TareEncoder();
+        m_pSafetyTimer->Reset();
+        m_pSafetyTimer->Start();
+        do
+        {
+            //I2cSequence();
+            
+            AutonomousEncoderDrive(driveSpeed);
+            
+            //SmartDashboard::PutNumber("Front Sonar A: ", m_I2cData.m_FrontSonarA);
+            //SmartDashboard::PutNumber("Front Sonar B: ", m_I2cData.m_FrontSonarB);
+        }
+        
+        // Positive, this drive is forwards
+        //while ((-(m_pLeftDriveMotor->GetEncoderValue()) < AUTO_ENCODER_DRIVE_THIRD_DIST_TURNS) && (m_pRightDriveMotor->GetEncoderValue() < AUTO_ENCODER_DRIVE_THIRD_DIST_TURNS));
+        while ((-(m_pLeftDriveMotor->GetEncoderValue()) < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_THIRD_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+              && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_THIRD_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+              && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+        m_pSafetyTimer->Stop();
+        
+        m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_L_MOTOR_SPEED);
+        m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_R_MOTOR_SPEED);
+        AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        
+        AutonomousDelay(AUTO_DELAY_SHORT_S);
+    }
+    else
+    {
+        return;
+    }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Turn towards the goal.
+////////////////////////////////////////////////////////////////////////////////
+    bIsAutonomous = m_pDriverStation->IsAutonomous();
+    if (bIsAutonomous)
+    {
+        if (!AutonomousGyroLeftTurn(AUTO_TURN_TO_BOILER_ANGLE_DEGREES, AUTO_TURN_SPEED))
+        {
+            return;
+        }
+    
+    
+    
+////////////////////////////////////////////////////////////////////////////////
+// Shoot.
+////////////////////////////////////////////////////////////////////////////////
+        if (bEndShoot)
+        {
+            AutonomousShoot();
+        }
+    }
+}
+
+
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousRoutine1
+///
+/// Autonomous routine 1.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousRoutine1()
+{
+    AutonomousCommon(false, false);
+}
+
+
+    
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousRoutine2
+///
+/// Autonomous routine 2.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousRoutine2()
+{
+    // First angle the shooter forward
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Start();
+    m_pFuelShooterAngleMotor->Set(-SHOOTER_ANGLE_SCALING);
+    while (m_pShooterAngleDownLimitSwitch->Get() && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+    {
+    }
+    m_pFuelShooterAngleMotor->Set(OFF);
+    m_pSafetyTimer->Stop();
+    m_pSafetyTimer->Reset();
+    
+    // Turn the agitator on, shoot, agitator back off
+    m_pAgitatorMotor->Set(ON);
+    AutonomousShoot();    
+    m_pAgitatorMotor->Set(OFF);
+    
+    if (m_AllianceColor == Alliance::kRed)
+    {
+        // Auto 2 shoots first
+        
+        // Veer to the right
+        m_pLeftDriveMotor->Set(-(AUTO_DRIVE_SPEED_SLOW + 0.10F));
+        m_pRightDriveMotor->Set(AUTO_DRIVE_SPEED_SLOW - 0.05F);
+        m_pSafetyTimer->Start();
+        while (m_pSafetyTimer->Get() < 3.0F)
+        {
+        }
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        m_pSafetyTimer->Stop();
+        m_pSafetyTimer->Reset();
+        
+        // Gyro turn is protected by the safety timer
+        // Left turn from the 45, half the slop
+        //bool bResult = AutonomousGyroLeftTurn((AUTO_FORTY_FIVE_DEGREE_TURN_ANGLE + AUTO_NINETY_DEGREE_TURN_ANGLE + (AUTO_TURN_ANGLE_SLOP_DEGREES / 2.0F)), AUTO_TURN_SPEED);
+        //AutonomousDelay(AUTO_DELAY_SHORT_S);
+        
+        //if (!bResult)
+        //{
+        // return;
+        //}
+        
+        //AutonomousCommonRed(-AUTO_DRIVE_SPEED_SLOW, false);
+    }
+    else if (m_AllianceColor == Alliance::kBlue)
+    {
+        // Veer to the left
+        m_pLeftDriveMotor->Set(-(AUTO_DRIVE_SPEED_SLOW - 0.05F));
+        m_pRightDriveMotor->Set(AUTO_DRIVE_SPEED_SLOW + 0.20F);
+        m_pSafetyTimer->Start();
+        while (m_pSafetyTimer->Get() < 3.0F)
+        {
+        }
+        m_pLeftDriveMotor->Set(OFF);
+        m_pRightDriveMotor->Set(OFF);
+        m_pSafetyTimer->Stop();
+        m_pSafetyTimer->Reset();
+        
+        //AutonomousCommonBlue(AUTO_DRIVE_SPEED_SLOW, false);
+    }
+    else
+    {
+    }
+    
+    /*
+    m_pLeftDriveMotor->TareEncoder();
+    m_pRightDriveMotor->TareEncoder();
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Start();
+    do
+    {
+        AutonomousEncoderDrive(AUTO_DRIVE_SPEED_SLOW);
+    }
+    while ((-(m_pLeftDriveMotor->GetEncoderValue()) < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+          && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_FIRST_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+          && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+    m_pSafetyTimer->Stop();
+    
+    m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_L_MOTOR_SPEED);
+    m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_FWD_R_MOTOR_SPEED);
+    AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+    m_pLeftDriveMotor->Set(OFF);
+    m_pRightDriveMotor->Set(OFF);
+    */
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousRoutine3
+///
+/// Autonomous routine 3.  This just drives to cross the line.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousRoutine3()
+{
+    // Tare the encoders for the drive
+    m_pLeftDriveMotor->TareEncoder();
+    m_pRightDriveMotor->TareEncoder();
+    
+    // Auto 3/4 start the same, find out how far to drive
+    float driveDist = 0.0F;
+    if (AUTONOMOUS_ROUTINE_3)
+    {
+        driveDist = AUTO_ENCODER_DRIVE_STRAIGHT_ONLY_IN;
+    }
+    // Auto 4 goes as far as the Auto 1/2 routine initially
+    else if (AUTONOMOUS_ROUTINE_4)
+    {
+        driveDist = AUTO_ENCODER_DRIVE_FIRST_DIST_IN;
+    }
+    else
+    {
+    }
+    
+    // Start the safety timer
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Start();
+    do
+    {
+        AutonomousEncoderDrive(AUTO_DRIVE_SPEED_SLOW);
+    }
+    while ((-(m_pLeftDriveMotor->GetEncoderValue()) < GetEncoderRotationsFromInches(driveDist, DRIVE_WHEEL_DIAMETER_INCHES))
+          && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(driveDist, DRIVE_WHEEL_DIAMETER_INCHES))
+          && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+    
+    // Stop the safety timer
+    m_pSafetyTimer->Stop();
+    
+    // Back drive to slow down
+    m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_L_MOTOR_SPEED);
+    m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_R_MOTOR_SPEED);
+    AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+    
+    // Motors off
+    m_pLeftDriveMotor->Set(OFF);
+    m_pRightDriveMotor->Set(OFF);
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousRoutine4
+///
+/// Autonomous routine 4.  This just drives to cross the line,
+/// followed by dumping a ball container
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousRoutine4()
+{
+    // Start is the same as Routine 3
+    AutonomousRoutine3();
+    AutonomousDelay(AUTO_DELAY_SHORT_S);
+    
+    // Red alliance is right turn
+    if (m_AllianceColor == Alliance::kRed)
+    {
+        AutonomousGyroRightTurn(AUTO_NINETY_DEGREE_TURN_ANGLE + 6.0F, AUTO_TURN_SPEED);
+    }
+    // Blue alliance is left turn
+    else if (m_AllianceColor == Alliance::kBlue)
+    {
+        AutonomousGyroLeftTurn(AUTO_NINETY_DEGREE_TURN_ANGLE + 6.0F, AUTO_TURN_SPEED);
+    }
+    else
+    {
+    }
+    
+    AutonomousDelay(AUTO_DELAY_SHORT_S);
+    
+    // Drive to knock some balls down
+    
+    // New drive operation, tare the encoders
+    m_pLeftDriveMotor->TareEncoder();
+    m_pRightDriveMotor->TareEncoder();
+    
+    // Start the safety timer
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Start();
+    do
+    {
+        AutonomousEncoderDrive(AUTO_DRIVE_SPEED_FAST);
+        
+        SmartDashboard::PutNumber("Enc. L: ", -(m_pLeftDriveMotor->GetEncoderValue()));
+        SmartDashboard::PutNumber("Enc. R: ", m_pRightDriveMotor->GetEncoderValue());
+    }
+    
+    // ?, this drive is fwd/bck?  Same as Routine 1/2 second drive distance.
+    while (((-(m_pLeftDriveMotor->GetEncoderValue())) < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES)) 
+           && (m_pRightDriveMotor->GetEncoderValue() < GetEncoderRotationsFromInches(AUTO_ENCODER_DRIVE_SECOND_DIST_IN, DRIVE_WHEEL_DIAMETER_INCHES))
+           && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE));
+          
+    // Stop the safety timer
+    m_pSafetyTimer->Stop();
+    
+    // Back drive to slow down
+    m_pLeftDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_L_MOTOR_SPEED * 2.0F);
+    m_pRightDriveMotor->Set(AUTO_COUNTERACT_COAST_REV_R_MOTOR_SPEED * 2.0F);
+    AutonomousDelay(AUTO_COUNTERACT_COAST_TIME_S);
+    
+    // Motors off
+    m_pLeftDriveMotor->Set(OFF);
+    m_pRightDriveMotor->Set(OFF);
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousShoot
+///
+/// Shoot fuel balls during autonomous.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousShoot()
+{
+    static int shotNumber = 0;
+    
+    // Turn injector and shooter motors on
+    //m_pFuelPumpMotor->Set(AUTO_FUEL_PUMP_MOTOR_SPEED);
+    m_pFuelInjectorMotor->Set(AUTO_FUEL_INJECT_AND_SHOOT_MOTOR_SPEED);
+    m_pFuelShooterMotor->Set(-AUTO_FUEL_INJECT_AND_SHOOT_MOTOR_SPEED);
+    
+    bool bPulseInProgress = false;
+    
+    // Timed shot
+    m_pAutonomousTimer->Start();
+    while (m_pAutonomousTimer->Get() < AUTO_SHOOT_DELAY_S)
+    {
+        if (!bPulseInProgress)
+        {
+            m_pFuelPumpMotor->TareEncoder();
+            m_pFuelPumpMotor->Set(AUTO_FUEL_PUMP_MOTOR_SPEED);
+            bPulseInProgress = true;
+            shotNumber++;
+        }
+        else
+        {
+            if (m_pFuelPumpMotor->GetEncoderValue() >= ENCODER_TURNS_PER_FUEL_PUMP_PULSE)
+            {
+                m_pFuelPumpMotor->Set(-ON * MOTOR_BACK_DRIVE_SPEED);
+                m_pFuelPumpTimer->Reset();
+                m_pFuelPumpTimer->Start();
+                
+                // Tare the encoder so that we don't come back in here
+                m_pFuelPumpMotor->TareEncoder();
+            }
+        
+            if (m_pFuelPumpTimer->Get() >= FUEL_PUMP_SPACING_DELAY_S)
+            {
+                m_pFuelPumpMotor->Set(OFF);
+                
+                m_pFuelPumpTimer->Stop();
+                m_pFuelPumpTimer->Reset();
+                
+                // Every other shot, back drive to prevent jamming
+                if ((shotNumber % 3) == 0)
+                {
+                    m_pFuelPumpMotor->Set(-ON * FUEL_PUMP_SCALING_REVERSE);
+                    m_pFuelPumpTimer->Start();
+                    while (m_pFuelPumpTimer->Get() < FUEL_PUMP_SPACING_DELAY_S)
+                    {
+                    }
+                    m_pFuelPumpMotor->Set(OFF);
+                    m_pFuelPumpTimer->Stop();
+                    m_pFuelPumpTimer->Reset();
+                }
+                bPulseInProgress = false;
+            }
+        }
+    }
+    m_pAutonomousTimer->Stop();
+    m_pAutonomousTimer->Reset();
+    
+    // Motors off
+    m_pFuelPumpMotor->Set(OFF);
+    m_pFuelInjectorMotor->Set(OFF);
+    m_pFuelShooterMotor->Set(OFF);
+    AutonomousDelay(AUTO_DELAY_SHORT_S);
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousGyroLeftTurn
+///
+/// Turns the robot left based on gyro readings.
+///
+////////////////////////////////////////////////////////////////
+bool CmsdRobot::AutonomousGyroLeftTurn(float destAngle, float turnSpeed)
+{
+    // 2017 LEFT FORWARD DRIVE IS NEGATIVE
+    // 2017 RIGHT FORWARD DRIVE IS POSITIVE    
+    // 2017 LEFT TURNS DECREASE GYRO ANGLE
+    
+    float startAngle = m_pGyro->GetAngle();
+    
+    // Left turns are right motors forward, left motors reverse
+    m_pLeftDriveMotor->Set(turnSpeed);
+    m_pRightDriveMotor->Set(turnSpeed);
+    
+    // Angle will be decreasing
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Start();
+    while ((m_pGyro->GetAngle() > (startAngle - destAngle)) && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE))
+    {
+        SmartDashboard::PutNumber("Gyro: ", m_pGyro->GetAngle());
+    }
+    m_pSafetyTimer->Stop();
+    
+    if (m_pSafetyTimer->Get() > SAFETY_TIMER_MAX_VALUE)
+    {
+        m_pSafetyTimer->Reset();
+        return false;
+    }
+    
+    // Counteract coast
+    m_pAutonomousTimer->Start();
+    m_pLeftDriveMotor->Set(-turnSpeed);
+    m_pRightDriveMotor->Set(-turnSpeed);
+    while (m_pAutonomousTimer->Get() < AUTO_COUNTERACT_COAST_TIME_S)
+    {
+    }
+    m_pAutonomousTimer->Stop();
+    m_pAutonomousTimer->Reset();
+    
+    // Motors off
+    m_pLeftDriveMotor->Set(OFF);
+    m_pRightDriveMotor->Set(OFF);
+    
+    m_pSafetyTimer->Reset();
+    return true;
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousGyroRightTurn
+///
+/// Turns the robot right based on gyro readings.
+///
+////////////////////////////////////////////////////////////////
+bool CmsdRobot::AutonomousGyroRightTurn(float destAngle, float turnSpeed)
+{
+    // 2017 LEFT FORWARD DRIVE IS NEGATIVE
+    // 2017 RIGHT FORWARD DRIVE IS POSITIVE
+    // 2017 RIGHT TURNS INCREASE GYRO ANGLE
+    
+    float startAngle = m_pGyro->GetAngle();
+    
+    // Right turns are left motors forward, right motors reverse
+    m_pLeftDriveMotor->Set(-turnSpeed);
+    m_pRightDriveMotor->Set(-turnSpeed);
+    
+    // Angle will be increasing
+    m_pSafetyTimer->Reset();
+    m_pSafetyTimer->Stop();
+    while ((m_pGyro->GetAngle() < (startAngle + destAngle)) && (m_pSafetyTimer->Get() <= SAFETY_TIMER_MAX_VALUE))
+    {
+        SmartDashboard::PutNumber("Gyro: ", m_pGyro->GetAngle());
+    }
+    m_pSafetyTimer->Stop();
+    
+    if (m_pSafetyTimer->Get() > SAFETY_TIMER_MAX_VALUE)
+    {
+        m_pSafetyTimer->Reset();
+        return false;
+    }
+    
+    // Counteract coast
+    m_pAutonomousTimer->Start();
+    m_pLeftDriveMotor->Set(turnSpeed);
+    m_pRightDriveMotor->Set(turnSpeed);
+    while (m_pAutonomousTimer->Get() < AUTO_COUNTERACT_COAST_TIME_S)
+    {
+    }
+    m_pAutonomousTimer->Stop();
+    m_pAutonomousTimer->Reset();
+    
+    // Motors off
+    m_pLeftDriveMotor->Set(OFF);
+    m_pRightDriveMotor->Set(OFF);
+    
+    m_pSafetyTimer->Reset();
+    return true;
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::GetEncoderRotationsFromInches
+///
+/// Returns a number of encoder turns based on input distance in
+/// inches and a diameter of the object turning.  It is based on
+/// the 4x (4096) quadrature encoders.
+///
+////////////////////////////////////////////////////////////////
+int CmsdRobot::GetEncoderRotationsFromInches(int inches, float diameter, bool bUseQuadEncoding)
+{
+    // c = PI*d
+    // (PI*d)/4096 is ratio of one encoder turn to a distance of
+    // travel of one diameter rotations.  To scale up, use cross
+    // multiply and divide.  Therefore:
+    //   PI * d     x(in.)
+    //  -------- = --------
+    //    4096      y(rot)
+    // x and d are inputs, so solve for y.
+    // y = (4096x)/(PI*d)
+    // This is for quadrature encoding, so if analog (single)
+    // encoding is desired, the result needs to be divided by four.
+    // If 4" wheels are in use, 3911.39188 turns = 12"
+    volatile int numerator = QUADRATURE_ENCODING_ROTATIONS * inches;
+    volatile float denominator = M_PI * diameter;
+    volatile int result = numerator / denominator;
+    //int result = (QUADRATURE_ENCODING_ROTATIONS * inches) / (M_PI * diameter);
+    
+    if (!bUseQuadEncoding)
+    {
+        result /= 4;
+    }
+    
+    return result;
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousEncoderDrive
+///
+/// Autonomous method to drive the robot controlled by the
+/// encoders.
+///
+////////////////////////////////////////////////////////////////
+void CmsdRobot::AutonomousEncoderDrive(float speed)
+{
+    // 2017 LEFT FORWARD DRIVE IS NEGATIVE
+    // 2017 RIGHT FORWARD DRIVE IS POSITIVE
+    // 2017 LEFT ENCODER VALUE DECREASES GOING FORWARD
+    // 2017 RIGHT ENCODER VALUE INCREASES GOING FORWARD
+    
+    // 1024 is the encoder output after one rotation
+    // 2017 Wheels are 4", therefore circumference = 4*PI
+    // Ratio is (4*PI)/1024 = PI/256
+    //
+    //   x  |  y  
+    // -----------
+    //  12" | (3072 / PI) = 977.84797
+    //  24" | (6144 / PI) = 1955.6959
+    //  ... | ...
+    // 120" | (30720 / PI) = 9778.4797
+    // 132" | (33792 / PI) = 10756.32767
+    // 144" | (36864 / PI) = 11734.17564
+    
+    // Get initial encoder values
+    int leftEncVal = -(m_pLeftDriveMotor->GetEncoderValue());
+    int rightEncVal = m_pRightDriveMotor->GetEncoderValue();
+    
+    // Set speeds, adjust below if needed
+    float leftDriveSpeed = speed;
+    float rightDriveSpeed = speed;
+    
+    // If left is ahead of right, slow down left, increase right
+    if (leftEncVal > rightEncVal)
+    {
+        leftDriveSpeed -= AUTO_DRIVE_COMPENSATE_SPEED * 1.5F;
+        rightDriveSpeed += AUTO_DRIVE_COMPENSATE_SPEED;
+    }
+    // If right is head of left, slow down right, increase left
+    else if (leftEncVal < rightEncVal)
+    {
+        leftDriveSpeed += AUTO_DRIVE_COMPENSATE_SPEED;
+        rightDriveSpeed -= AUTO_DRIVE_COMPENSATE_SPEED;
+    }
+    else
+    {
+    }
+    
+    m_pLeftDriveMotor->Set(-leftDriveSpeed);
+    m_pRightDriveMotor->Set(rightDriveSpeed);
+    
+    if (DEBUG_PRINTS)
+    {
+        SmartDashboard::PutNumber("Enc. L: ", leftEncVal);
+        SmartDashboard::PutNumber("Enc. R: ", rightEncVal);
+        SmartDashboard::PutNumber("Enc Diff: ", leftEncVal - rightEncVal);\
+    }
+}
+
+
+
+////////////////////////////////////////////////////////////////
+// @method CmsdRobot::AutonomousSonarDrive
+///
+/// Autonomous method to drive the robot controlled by the
+/// sonar sensors.
+///
+////////////////////////////////////////////////////////////////
+bool CmsdRobot::AutonomousSonarDrive(SonarDriveDirection driveDirection, SonarDriveState driveState, uint32_t destLateralDist, uint32_t destSideDist)
+{    
+    // Set directions based on drive state
+    uint32_t sideDirection = driveState & SONAR_DRIVE_STATE_SIDE_MASK;
+    uint32_t lateralDirection = driveState & SONAR_DRIVE_STATE_LATERAL_MASK;
+    
+    uint32_t frontGuideSensor = 0U;
+    uint32_t backGuideSensor = 0U;
+    uint32_t destGuideSensorA = 0U;
+    uint32_t destGuideSensorB = 0U;
+    
+    // Set values based on which side is guiding drive        
+    switch (lateralDirection)
+    {
+        case FORWARD_GUIDE:
+        {
+            //destGuideSensorA = m_I2cData.m_FrontSonarA;
+            destGuideSensorA = m_I2cData.m_FrontSonarB;
+            destGuideSensorB = m_I2cData.m_FrontSonarB;
+            switch (sideDirection)
+            {
+                case LEFT_GUIDE:
+                {
+                    frontGuideSensor = m_I2cData.m_LeftSonarB;
+                    backGuideSensor = m_I2cData.m_LeftSonarA;
+                    break;
+                }
+                case RIGHT_GUIDE:
+                {
+                    //frontGuideSensor = m_I2cData.m_RightSonarA;
+                    frontGuideSensor = m_I2cData.m_RightSonarB;
+                    backGuideSensor = m_I2cData.m_RightSonarB;
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            
+            break;
+        }
+        case REVERSE_GUIDE:
+        {
+            destGuideSensorA = m_I2cData.m_BackSonarA;
+            destGuideSensorB = m_I2cData.m_BackSonarB;
+            switch (sideDirection)
+            {
+                case LEFT_GUIDE:
+                {
+                    frontGuideSensor = m_I2cData.m_LeftSonarA;
+                    backGuideSensor = m_I2cData.m_LeftSonarB;
+                    break;
+                }
+                case RIGHT_GUIDE:
+                {
+                    frontGuideSensor = m_I2cData.m_RightSonarB;
+                    //backGuideSensor = m_I2cData.m_RightSonarA;
+                    backGuideSensor = m_I2cData.m_RightSonarB;
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+    
+    // Start with defaults of off and no turning
+    float leftDriveSpeed = OFF;
+    float rightDriveSpeed = OFF;    
+    bool bLeftTurn = false;
+    bool bRightTurn = false;
+    bool bCanOverrideTurn = true;
+    
+    // Make sure we're close enough to a guiding structure
+    if (    (frontGuideSensor < AUTO_SONAR_MIN_DRIVE_ENABLE_INCHES)
+         && (backGuideSensor < AUTO_SONAR_MIN_DRIVE_ENABLE_INCHES) )
+    {
+        // Start assuming a straight drive
+        leftDriveSpeed = AUTO_SONAR_DRIVE_LEFT_SPEED;
+        rightDriveSpeed = AUTO_SONAR_DRIVE_RIGHT_SPEED;
+        
+        // Check for turning need.  The first checks here determine
+        // if we need to turn the robot left or right, and are to
+        // align the robot at a (mostly) right angle.
+        if (frontGuideSensor > backGuideSensor)
+        {
+            switch (sideDirection)
+            {
+                case LEFT_GUIDE:
+                {
+                    bRightTurn = true;
+                    break;
+                }
+                case RIGHT_GUIDE:
+                {
+                    bLeftTurn = true;
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            
+            // If the robot is offset too sharply, don't allow
+            // the guiding below to override what we want to do.
+            if ((frontGuideSensor - backGuideSensor) > AUTO_SONAR_MAX_ALLOWED_READING_DIFF)
+            {
+                bCanOverrideTurn = false;
+            }
+        }
+        else if (backGuideSensor > frontGuideSensor)
+        {
+            switch (sideDirection)
+            {
+                case LEFT_GUIDE:
+                {
+                    bLeftTurn = true;
+                    break;
+                }
+                case RIGHT_GUIDE:
+                {
+                    bRightTurn = true;
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            
+            // If the robot is offset too sharply, don't allow
+            // the guiding below to override what we want to do.
+            if ((backGuideSensor - frontGuideSensor) > AUTO_SONAR_MAX_ALLOWED_READING_DIFF)
+            {
+                bCanOverrideTurn = false;
+            }
+        }
+        else
+        {
+        }
+        
+        // Align with the destination distance.  These checks, unlike the ones
+        // above, are to move towards are target distance from the wall.
+        if (bCanOverrideTurn && (frontGuideSensor > destSideDist))
+        {
+            switch (sideDirection)
+            {
+                case LEFT_GUIDE:
+                {
+                    bLeftTurn = true;
+                    break;
+                }
+                case RIGHT_GUIDE:
+                {
+                    bRightTurn = true;
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+        }
+        
+        // Set the motor speed values
+        if (bLeftTurn)
+        {
+            leftDriveSpeed -= AUTO_SONAR_COMPENSATE_LEFT_SPEED;
+            rightDriveSpeed += AUTO_SONAR_COMPENSATE_RIGHT_SPEED;
+        }
+        else if (bRightTurn)
+        {
+            leftDriveSpeed += AUTO_SONAR_COMPENSATE_LEFT_SPEED;
+            rightDriveSpeed -= AUTO_SONAR_COMPENSATE_RIGHT_SPEED;
+        }
+        else
+        {
+        }
+        
+        // Speeds are now set based on need to turn.  Enable motors
+        // only if we have not reached the maximum distance.
+        if ((destGuideSensorA < destLateralDist) && (destGuideSensorB < destLateralDist))
+        {
+            if (driveDirection == SONAR_FORWARD)
+            {
+                m_pLeftDriveMotor->Set(leftDriveSpeed);
+                m_pRightDriveMotor->Set(rightDriveSpeed);
+            }
+            else if (driveDirection == SONAR_REVERSE)
+            {
+                m_pLeftDriveMotor->Set(-leftDriveSpeed);
+                m_pRightDriveMotor->Set(-rightDriveSpeed);
+            }
+            else
+            {
+            }
+            
+            return false;
+        }
+    }
+    
+    return true;
+}
